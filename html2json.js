@@ -120,7 +120,61 @@ function tokenize(html) {
     }
   }
 
+  console.log(tokens);
   return tokens;
+}
+
+function buildTree(tokens) {
+  const root = [];
+  const stack = [{ children: root, tag: null }];
+
+  for (let idx = 0; idx < tokens.length; idx++) {
+    const tok = tokens[idx];
+    const top = stack[stack.length - 1];
+
+    if (tok.type === "text") {
+      if (tok.content.length > 0 && !/^\s*$/.test(tok.content)) {
+        top.children.push({ text: tok.content });
+      }
+    } else if (tok.type === "comment") {
+      top.children.push({ comment: tok.content });
+    } else if (tok.type === "doctype") {
+      top.children.push({ doctype: tok.content });
+    } else if (tok.type === "directive") {
+      top.children.push({ directive: tok.content });
+    } else if (tok.type === "open") {
+      const el = { tag: tok.tag, attributes: tok.attributes, children: [] };
+      top.children.push(el);
+      if (tok.selfClosing) continue;
+      if (RAW_TEXT_ELEMENTS.has(tok.tag)) {
+        let raw = "";
+        let j = idx + 1;
+        let found = false;
+        while (j < tokens.length) {
+          const t = tokens[j];
+          if (t.type === "close" && t.tag === tok.tag) { found = true; break; }
+          raw += tokenToRaw(t);
+          j++;
+        }
+        if (raw.length > 0 && (tok.tag === "pre" || !/^\s*$/.test(raw))) {
+          el.children.push({ text: raw });
+        }
+        idx = found ? j : tokens.length;
+        continue;
+      }
+      stack.push(el);
+    } else if (tok.type === "close") {
+      if (!tok.tag) continue;
+      let depth = -1;
+      for (let k = stack.length - 1; k >= 1; k--) {
+        if (stack[k].tag === tok.tag) { depth = k; break; }
+      }
+      if (depth === -1) continue;
+      stack.length = depth;
+    }
+  }
+
+  return root;
 }
 
 // ---- helpers ----
@@ -163,66 +217,6 @@ function parseOpenTag(raw) {
   return { type: "open", tag, attributes: parseAttributes(rest), selfClosing };
 }
 
-function parseAttributes(rest) {
-  const attrs = {};
-  const re = /([^\s=/>]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'`=<>]+)))?/g;
-  let m;
-  while ((m = re.exec(rest)) !== null) {
-    const name = m[1].toLowerCase();
-    const value = m[2] !== undefined ? m[2] : m[3] !== undefined ? m[3] : m[4] !== undefined ? m[4] : "";
-    attrs[name] = value;
-  }
-  return attrs;
-}
-
-function buildTree(tokens) {
-  const root = [];
-  const stack = [{ children: root, tag: null }];
-
-  for (let idx = 0; idx < tokens.length; idx++) {
-    const tok = tokens[idx];
-    const top = stack[stack.length - 1];
-
-    if (tok.type === "text") {
-      if (tok.content.length > 0) top.children.push({ text: tok.content });
-    } else if (tok.type === "comment") {
-      top.children.push({ comment: tok.content });
-    } else if (tok.type === "doctype") {
-      top.children.push({ doctype: tok.content });
-    } else if (tok.type === "directive") {
-      top.children.push({ directive: tok.content });
-    } else if (tok.type === "open") {
-      const el = { tag: tok.tag, attributes: tok.attributes, children: [] };
-      top.children.push(el);
-      if (tok.selfClosing) continue;
-      if (RAW_TEXT_ELEMENTS.has(tok.tag)) {
-        let raw = "";
-        let j = idx + 1;
-        let found = false;
-        while (j < tokens.length) {
-          const t = tokens[j];
-          if (t.type === "close" && t.tag === tok.tag) { found = true; break; }
-          raw += tokenToRaw(t);
-          j++;
-        }
-        if (raw.length > 0) el.children.push({ text: raw });
-        idx = found ? j : tokens.length;
-        continue;
-      }
-      stack.push(el);
-    } else if (tok.type === "close") {
-      if (!tok.tag) continue;
-      let depth = -1;
-      for (let k = stack.length - 1; k >= 1; k--) {
-        if (stack[k].tag === tok.tag) { depth = k; break; }
-      }
-      if (depth === -1) continue;
-      stack.length = depth;
-    }
-  }
-
-  return root;
-}
 
 // Re-serialize a single token to raw string
 function tokenToRaw(t) {
@@ -243,6 +237,20 @@ function tokenToRaw(t) {
   if (t.type === "close") return "</" + t.tag + ">";
   return "";
 }
+
+function parseAttributes(rest) {
+  const attrs = {};
+  const re = /([^\s=/>]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'`=<>]+)))?/g;
+  let m;
+  while ((m = re.exec(rest)) !== null) {
+    const name = m[1].toLowerCase();
+    const value = m[2] !== undefined ? m[2] : m[3] !== undefined ? m[3] : m[4] !== undefined ? m[4] : "";
+    attrs[name] = value;
+  }
+  return attrs;
+}
+
+// ------------
 
 function showExample1() {
   const htmlExample = `<!DOCTYPE html>
@@ -281,19 +289,8 @@ function showExample1() {
 </body>
 </html>
 `;
-  const jsonContent = {
-    "Comment 1":
-      "You have to think about how to take into account various html inputs so your json structure will cover them all and handle different cases.",
-    "Comment 2":
-      "When you make any choice in terms of selecting specific json structure for conversion - be ready to provide reasoning behind such choice.",
-  };
 
   document.getElementById("html").value = htmlExample;
-  document.getElementById("json").textContent = JSON.stringify(
-    jsonContent,
-    null,
-    2
-  );
 }
 
 function showExample2() {
@@ -303,17 +300,6 @@ function showExample2() {
   <textarea>Some very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very long string.</textarea>
 </div>
 `;
-  const jsonContent = {
-    "Comment 1":
-      "You have to think about how to take into account various html inputs so your json structure will cover them all and handle different cases.",
-    "Comment 2":
-      "When you make any choice in terms of selecting specific json structure for conversion - be ready to provide reasoning behind such choice.",
-  };
 
   document.getElementById("html").value = htmlExample;
-  document.getElementById("json").textContent = JSON.stringify(
-    jsonContent,
-    null,
-    2
-  );
 }
