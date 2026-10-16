@@ -22,8 +22,7 @@ const VOID_ELEMENTS = new Set([
   "link", "meta", "param", "source", "track", "wbr",
 ]);
 
-// content of these must not be parsed as tags
-const RAW_TEXT_ELEMENTS = new Set(["script", "style", "textarea"]);
+const RAW_TEXT_ELEMENTS = new Set(["script", "style", "textarea", "pre"]);
 
 function tokenize(html) {
   const tokens = [];
@@ -91,10 +90,11 @@ function tokenize(html) {
       continue;
     }
 
-    // 5. Text node: everything up to next "<"
+    // 5. Text node: everything up to next "<" (whitespace-only runs are
+    // skipped right here so buildTree() never sees junk tokens)
     const nextLt = html.indexOf("<", i);
     if (nextLt === -1) {
-      tokens.push({ type: "text", content: html.slice(i) });
+      pushText(html.slice(i));
       i = len;
     } else {
       const second = html[nextLt + 1];
@@ -102,26 +102,34 @@ function tokenize(html) {
         second === "!" || second === "/" ||
         (second !== undefined && /[A-Za-z]/.test(second));
       if (nextLt === i && !isTokenStart) {
-        tokens.push({ type: "text", content: "<" });
+        pushText("<");
         i = i + 1;
       } else if (!isTokenStart) {
         const afterBogus = html.indexOf("<", nextLt + 1);
         if (afterBogus === -1) {
-          tokens.push({ type: "text", content: html.slice(i) });
+          pushText(html.slice(i));
           i = len;
         } else {
-          tokens.push({ type: "text", content: html.slice(i, afterBogus) });
+          pushText(html.slice(i, afterBogus));
           i = afterBogus;
         }
       } else {
-        tokens.push({ type: "text", content: html.slice(i, nextLt) });
+        if (nextLt > i) {
+          pushText(html.slice(i, nextLt));
+        }
         i = nextLt;
       }
     }
   }
 
-  console.log(tokens);
   return tokens;
+
+  // pushes a text token only if it carries meaning
+  function pushText(content) {
+    if (content.length > 0 && !/^\s*$/.test(content)) {
+      tokens.push({ type: "text", content });
+    }
+  }
 }
 
 function buildTree(tokens) {
@@ -133,9 +141,7 @@ function buildTree(tokens) {
     const top = stack[stack.length - 1];
 
     if (tok.type === "text") {
-      if (tok.content.length > 0 && !/^\s*$/.test(tok.content)) {
-        top.children.push({ text: tok.content });
-      }
+      top.children.push({ text: tok.content });
     } else if (tok.type === "comment") {
       top.children.push({ comment: tok.content });
     } else if (tok.type === "doctype") {
